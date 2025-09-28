@@ -25,15 +25,18 @@ class SimpleTokenizer:
         self.vocab = {}
         self.inverse_vocab = {}
         self.vocab_size = 0
+        self.unk_token = '<UNK>'
 
     def build_vocab(self, text):
         chars = sorted(list(set(text)))
+        # Add unknown token at the beginning
+        chars = [self.unk_token] + chars
         self.vocab_size = len(chars)
         self.vocab = {ch: i for i, ch in enumerate(chars)}
         self.inverse_vocab = {i: ch for i, ch in enumerate(chars)}
 
     def encode(self, text):
-        return [self.vocab[c] for c in text]
+        return [self.vocab.get(c, self.vocab[self.unk_token]) for c in text]
 
     def decode(self, tokens):
         return ''.join([self.inverse_vocab[t] for t in tokens])
