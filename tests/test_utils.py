@@ -26,9 +26,9 @@ class TestInference:
         assert inference.device in ['cpu', 'cuda', 'mps']
 
     def test_gpt_inference_generate(self):
-        model = SmallGPT(vocab_size=100, d_model=64, n_heads=4, n_layers=2)
         tokenizer = SimpleTokenizer()
         tokenizer.build_vocab("abcdefghijklmnopqrstuvwxyz ")
+        model = SmallGPT(vocab_size=tokenizer.vocab_size, d_model=64, n_heads=4, n_layers=2)
 
         inference = GPTInference(model, tokenizer, device='cpu')
 
@@ -39,9 +39,9 @@ class TestInference:
         assert len(generated) >= len(prompt)
 
     def test_generate_text_function(self):
-        model = SmallGPT(vocab_size=100, d_model=64, n_heads=4, n_layers=2)
         tokenizer = SimpleTokenizer()
         tokenizer.build_vocab("abcdefghijklmnopqrstuvwxyz ")
+        model = SmallGPT(vocab_size=tokenizer.vocab_size, d_model=64, n_heads=4, n_layers=2)
 
         prompt = "test"
         generated = generate_text(
@@ -52,9 +52,9 @@ class TestInference:
         assert len(generated) >= len(prompt)
 
     def test_inference_batch_generation(self):
-        model = SmallGPT(vocab_size=100, d_model=64, n_heads=4, n_layers=2)
         tokenizer = SimpleTokenizer()
         tokenizer.build_vocab("abcdefghijklmnopqrstuvwxyz ")
+        model = SmallGPT(vocab_size=tokenizer.vocab_size, d_model=64, n_heads=4, n_layers=2)
 
         inference = GPTInference(model, tokenizer, device='cpu')
 

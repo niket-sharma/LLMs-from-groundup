@@ -18,7 +18,7 @@ class TestSimpleTokenizer:
         tokenizer = SimpleTokenizer()
         tokenizer.build_vocab(text)
 
-        assert tokenizer.vocab_size == len(set(text))
+        assert tokenizer.vocab_size == len(set(text)) + 1  # +1 for UNK token
         assert 'h' in tokenizer.vocab
         assert 'w' in tokenizer.vocab
         assert ' ' in tokenizer.vocab

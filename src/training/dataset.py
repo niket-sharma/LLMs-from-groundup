@@ -15,6 +15,11 @@ class TextDataset(Dataset):
 
     def __getitem__(self, idx):
         chunk = self.data[idx:idx + self.block_size + 1]
+
+        # Handle both lists and numpy arrays
+        if isinstance(chunk, list):
+            chunk = np.array(chunk, dtype=np.int64)
+
         x = torch.from_numpy((chunk[:-1]).astype(np.int64))
         y = torch.from_numpy((chunk[1:]).astype(np.int64))
         return x, y
