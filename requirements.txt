@@ -1,0 +1,65 @@
+# =============================================================================
+# LLMs-from-groundup - Requirements
+# =============================================================================
+# This file contains all dependencies needed to run the full codebase including:
+# - Core model training and inference
+# - Reinforcement Learning (RLHF) examples
+# - Visualization and interpretability tools
+# - Jupyter notebook tutorials
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Dependencies
+# -----------------------------------------------------------------------------
+
+# PyTorch - Deep learning framework (CPU version by default)
+# For GPU support, install the appropriate version from https://pytorch.org/
+torch>=2.0.0
+
+# NumPy - Numerical computing
+numpy>=1.21.0
+
+# tqdm - Progress bars for training loops
+tqdm>=4.62.0
+
+# -----------------------------------------------------------------------------
+# Visualization Dependencies
+# -----------------------------------------------------------------------------
+
+# Matplotlib - Plotting library
+matplotlib>=3.5.0
+
+# Seaborn - Statistical visualization (attention heatmaps)
+seaborn>=0.12.0
+
+# -----------------------------------------------------------------------------
+# Machine Learning Utilities
+# -----------------------------------------------------------------------------
+
+# Scikit-learn - For PCA, t-SNE embeddings visualization
+scikit-learn>=1.0.0
+
+# -----------------------------------------------------------------------------
+# Jupyter Support
+# -----------------------------------------------------------------------------
+
+# Jupyter - For running tutorial notebooks
+jupyter>=1.0.0
+notebook>=6.4.0
+ipywidgets>=7.6.0
+
+# -----------------------------------------------------------------------------
+# Development Dependencies (optional, for contributors)
+# -----------------------------------------------------------------------------
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Code formatting and linting
+black>=22.0.0
+flake8>=4.0.0
+isort>=5.0.0
+
+# Type checking (optional)
+# mypy>=0.950

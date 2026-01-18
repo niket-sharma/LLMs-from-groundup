@@ -29,13 +29,11 @@ MANIFEST
 
 # Data
 data/
-*.txt
-*.json
-*.csv
 
-# Checkpoints
+# Checkpoints and saved models
 checkpoints/
-models/
+saved_models/*.pt
+saved_models/*.pth
 *.ckpt
 
 # Jupyter Notebook
