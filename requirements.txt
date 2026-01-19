@@ -2,14 +2,15 @@
 # LLMs-from-groundup - Requirements
 # =============================================================================
 # This file contains all dependencies needed to run the full codebase including:
-# - Core model training and inference
+# - Core model training and inference (src/)
 # - Reinforcement Learning (RLHF) examples
 # - Visualization and interpretability tools
 # - Jupyter notebook tutorials
+# - Practical LLM examples with APIs and HuggingFace (practical_llms/)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Core Dependencies
+# Core Dependencies (Building LLMs from Scratch)
 # -----------------------------------------------------------------------------
 
 # PyTorch - Deep learning framework (CPU version by default)
@@ -47,6 +48,42 @@ scikit-learn>=1.0.0
 jupyter>=1.0.0
 notebook>=6.4.0
 ipywidgets>=7.6.0
+
+# -----------------------------------------------------------------------------
+# Practical LLMs - API Clients (practical_llms/inference/)
+# -----------------------------------------------------------------------------
+
+# OpenAI API client
+openai>=1.0.0
+
+# Anthropic (Claude) API client
+anthropic>=0.18.0
+
+# -----------------------------------------------------------------------------
+# Practical LLMs - HuggingFace Ecosystem (practical_llms/)
+# -----------------------------------------------------------------------------
+
+# Transformers - Pre-trained models and tokenizers
+transformers>=4.36.0
+
+# Datasets - Data loading and processing
+datasets>=2.16.0
+
+# Accelerate - Distributed training and mixed precision
+accelerate>=0.25.0
+
+# PEFT - Parameter-efficient fine-tuning (LoRA, QLoRA)
+peft>=0.7.0
+
+# TRL - Transformer Reinforcement Learning (RLHF, DPO, PPO)
+trl>=0.7.0
+
+# BitsAndBytes - Quantization for large models (optional, requires CUDA)
+# Uncomment if you have a CUDA GPU:
+# bitsandbytes>=0.42.0
+
+# Sentence Transformers - For embeddings (optional)
+# sentence-transformers>=2.2.0
 
 # -----------------------------------------------------------------------------
 # Development Dependencies (optional, for contributors)
