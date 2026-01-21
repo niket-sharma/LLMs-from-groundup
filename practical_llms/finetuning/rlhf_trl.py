@@ -18,9 +18,14 @@ Prerequisites:
 """
 
 import os
+import sys
+import argparse
 import torch
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+
+# Global flag for whether to actually run training
+RUN_TRAINING = False
 
 
 def check_dependencies():
@@ -80,7 +85,7 @@ def sft_with_trl():
     # SFT Config
     sft_config = SFTConfig(
         output_dir="./sft_trl_output",
-        max_seq_length=256,
+        max_length=256,  # Changed from max_seq_length in newer TRL versions
         num_train_epochs=1,
         per_device_train_batch_size=4,
         learning_rate=2e-5,
@@ -97,11 +102,17 @@ def sft_with_trl():
     )
 
     print("\nSFTTrainer ready!")
-    print("To train: trainer.train()")
 
     # Show what the formatted data looks like
     print("\nSample formatted data:")
     print(data[0]["text"][:200])
+
+    if RUN_TRAINING:
+        print("\n>>> Running SFT training (1 epoch)...")
+        trainer.train()
+        print(">>> SFT training complete!")
+    else:
+        print("To train: trainer.train()")
 
     return trainer
 
@@ -181,11 +192,17 @@ def train_reward_model():
     )
 
     print("\nRewardTrainer ready!")
-    print("To train: trainer.train()")
 
     print("\nPreference data format:")
     print(f"  Chosen: '{preference_data[0]['chosen'][:50]}...'")
     print(f"  Rejected: '{preference_data[0]['rejected'][:50]}...'")
+
+    if RUN_TRAINING:
+        print("\n>>> Running Reward Model training (1 epoch)...")
+        trainer.train()
+        print(">>> Reward Model training complete!")
+    else:
+        print("To train: trainer.train()")
 
     return trainer
 
@@ -208,7 +225,7 @@ def ppo_training():
     print("=" * 60)
 
     from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSequenceClassification
-    from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead
+    from trl import PPOConfig, PPOTrainer
     from datasets import Dataset
 
     model_name = "distilgpt2"
@@ -218,11 +235,17 @@ def ppo_training():
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Policy model (with value head for PPO)
-    policy_model = AutoModelForCausalLMWithValueHead.from_pretrained(model_name)
+    # Policy model (the model being trained)
+    policy_model = AutoModelForCausalLM.from_pretrained(model_name)
 
     # Reference model (frozen, for KL penalty)
-    ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(model_name)
+    ref_model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    # Value model (estimates expected reward - separate in TRL 0.27.0+)
+    value_model = AutoModelForSequenceClassification.from_pretrained(
+        model_name,
+        num_labels=1,
+    )
 
     # Reward model (in practice, use a trained one)
     reward_model = AutoModelForSequenceClassification.from_pretrained(
@@ -230,19 +253,18 @@ def ppo_training():
         num_labels=1,
     )
 
-    # PPO Config
+    # PPO Config (updated for TRL 0.27.0+)
     ppo_config = PPOConfig(
         learning_rate=1e-5,
-        batch_size=4,
-        mini_batch_size=2,
+        per_device_train_batch_size=4,
         gradient_accumulation_steps=1,
-        ppo_epochs=4,
-        kl_penalty="kl",
-        target_kl=0.1,
-        log_with=None,
+        num_ppo_epochs=4,  # Changed from ppo_epochs
+        kl_coef=0.05,  # KL penalty coefficient (replaces kl_penalty/target_kl)
+        report_to=None,  # Changed from log_with
+        num_sample_generations=0,  # Disable sample generation (avoids eval dataset issue)
     )
 
-    # Create dataset of prompts
+    # Create dataset of prompts (TRL 0.27.0+ expects input_ids directly)
     prompts = [
         "Explain what Python is:",
         "What is machine learning?",
@@ -250,27 +272,44 @@ def ppo_training():
         "What is the internet?",
     ] * 10
 
-    dataset = Dataset.from_dict({"query": prompts})
+    # Tokenize prompts and create proper dataset format for PPO
+    def create_ppo_dataset(prompts, tokenizer, max_length=64):
+        """Create dataset with tokenized inputs for PPO."""
+        tokenized = tokenizer(
+            prompts,
+            padding="max_length",
+            truncation=True,
+            max_length=max_length,
+            return_tensors=None,  # Return lists, not tensors
+        )
+        return Dataset.from_dict({
+            "input_ids": tokenized["input_ids"],
+            "attention_mask": tokenized["attention_mask"],
+        })
 
-    # Tokenize prompts
-    def tokenize(sample):
-        sample["input_ids"] = tokenizer.encode(sample["query"])
-        return sample
+    dataset = create_ppo_dataset(prompts, tokenizer)
 
-    dataset = dataset.map(tokenize)
-
-    # Create PPO Trainer
+    # Create PPO Trainer (updated for TRL 0.27.0+)
     ppo_trainer = PPOTrainer(
-        config=ppo_config,
+        args=ppo_config,  # Changed from config to args
         model=policy_model,
         ref_model=ref_model,
+        reward_model=reward_model,  # Now required
+        value_model=value_model,  # Now required (separate from policy)
+        train_dataset=dataset,  # Now required
         processing_class=tokenizer,
     )
 
     print("\nPPOTrainer ready!")
-    print("\nPPO training loop (simplified):")
 
-    ppo_loop_code = '''
+    if RUN_TRAINING:
+        print("\n>>> Running PPO training (1 epoch)...")
+        # PPO trainer uses .train() method in TRL 0.27.0+
+        ppo_trainer.train()
+        print(">>> PPO training complete!")
+    else:
+        print("\nPPO training loop (simplified):")
+        ppo_loop_code = '''
     for batch in dataloader:
         # 1. Generate responses
         response_tensors = ppo_trainer.generate(batch["input_ids"])
@@ -287,7 +326,7 @@ def ppo_training():
 
         print(f"Mean reward: {stats['ppo/mean_scores']:.2f}")
     '''
-    print(ppo_loop_code)
+        print(ppo_loop_code)
 
     return ppo_trainer
 
@@ -369,7 +408,6 @@ def dpo_training():
     )
 
     print("\nDPOTrainer ready!")
-    print("To train: trainer.train()")
 
     print("\nDPO vs PPO comparison:")
     comparison = """
@@ -385,6 +423,13 @@ def dpo_training():
     └─────────────────┴────────────────────┴──────────────────────┘
     """
     print(comparison)
+
+    if RUN_TRAINING:
+        print("\n>>> Running DPO training (1 epoch)...")
+        trainer.train()
+        print(">>> DPO training complete!")
+    else:
+        print("To train: trainer.train()")
 
     return trainer
 
@@ -456,13 +501,19 @@ def orpo_training():
     )
 
     print("\nORPOTrainer ready!")
-    print("To train: trainer.train()")
 
     print("\nORPO advantages:")
     print("  - No reference model (saves memory)")
     print("  - Single-stage training")
     print("  - Combines SFT + alignment")
     print("  - State-of-the-art results")
+
+    if RUN_TRAINING:
+        print("\n>>> Running ORPO training (1 epoch)...")
+        trainer.train()
+        print(">>> ORPO training complete!")
+    else:
+        print("To train: trainer.train()")
 
     return trainer
 
@@ -555,9 +606,35 @@ def complete_pipeline():
 
 def main():
     """Run the TRL RLHF tutorial."""
+    global RUN_TRAINING
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="RLHF Tutorial with TRL Library",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python rlhf_trl.py           # Show tutorial (no training)
+  python rlhf_trl.py --train   # Actually run training (1 epoch each)
+        """
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Actually run training (1 epoch for each method). Without this flag, only shows setup."
+    )
+    args = parser.parse_args()
+
+    RUN_TRAINING = args.train
+
     print("=" * 60)
     print("RLHF with TRL (Transformer Reinforcement Learning)")
     print("=" * 60)
+
+    if RUN_TRAINING:
+        print("\n*** TRAINING MODE: Will run actual training (1 epoch each) ***\n")
+    else:
+        print("\n*** DEMO MODE: Showing setup only. Use --train to run training ***\n")
 
     if not check_dependencies():
         return
