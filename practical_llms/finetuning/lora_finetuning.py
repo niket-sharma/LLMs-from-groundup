@@ -19,12 +19,21 @@ How it works:
 - Only A and B are trained (much fewer parameters!)
 
 Prerequisites:
-    pip install transformers peft accelerate bitsandbytes datasets
+    pip install transformers peft accelerate datasets
+
+Usage:
+    python lora_finetuning.py           # Show tutorial (no training)
+    python lora_finetuning.py --train   # Actually run training (1 epoch)
 """
 
 import os
+import sys
+import argparse
 import torch
 from typing import Dict, Any, Optional
+
+# Global flag for whether to actually run training
+RUN_TRAINING = False
 
 
 def check_dependencies():
@@ -43,6 +52,79 @@ def check_dependencies():
     return True
 
 
+def detect_gpu_vram():
+    """Detect available GPU VRAM and return optimization recommendations."""
+    if not torch.cuda.is_available():
+        return {
+            'device': 'cpu',
+            'vram_gb': 0,
+            'batch_size': 2,
+            'use_fp16': False,
+            'use_8bit': False,
+            'gradient_checkpointing': True,
+            'max_length': 256,
+        }
+
+    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+
+    print(f"\n[GPU Detected] {torch.cuda.get_device_name(0)}")
+    print(f"[VRAM] {vram_gb:.1f} GB")
+
+    # Optimize settings based on VRAM
+    if vram_gb < 4:  # Very small GPU
+        config = {
+            'device': 'cuda',
+            'vram_gb': vram_gb,
+            'batch_size': 1,
+            'use_fp16': True,
+            'use_8bit': True,
+            'gradient_checkpointing': True,
+            'max_length': 128,
+            'recommendation': 'Using 8-bit + small batches for <4GB VRAM'
+        }
+    elif vram_gb < 8:  # Small GPU (GTX 1060, RTX 3050)
+        config = {
+            'device': 'cuda',
+            'vram_gb': vram_gb,
+            'batch_size': 2,
+            'use_fp16': True,
+            'use_8bit': False,
+            'gradient_checkpointing': True,
+            'max_length': 256,
+            'recommendation': 'Using FP16 + gradient checkpointing for 4-8GB VRAM'
+        }
+    elif vram_gb < 12:  # Medium GPU (RTX 3060, RTX 2080)
+        config = {
+            'device': 'cuda',
+            'vram_gb': vram_gb,
+            'batch_size': 4,
+            'use_fp16': True,
+            'use_8bit': False,
+            'gradient_checkpointing': False,
+            'max_length': 512,
+            'recommendation': 'Standard settings for 8-12GB VRAM'
+        }
+    else:  # Large GPU
+        config = {
+            'device': 'cuda',
+            'vram_gb': vram_gb,
+            'batch_size': 8,
+            'use_fp16': True,
+            'use_8bit': False,
+            'gradient_checkpointing': False,
+            'max_length': 512,
+            'recommendation': 'High performance settings for 12GB+ VRAM'
+        }
+
+    print(f"[Optimization] {config['recommendation']}")
+    print(f"  - Batch size: {config['batch_size']}")
+    print(f"  - FP16: {config['use_fp16']}")
+    print(f"  - 8-bit: {config['use_8bit']}")
+    print(f"  - Gradient checkpointing: {config['gradient_checkpointing']}")
+
+    return config
+
+
 # =============================================================================
 # Part 1: Understanding LoRA Configuration
 # =============================================================================
@@ -52,7 +134,7 @@ def explain_lora_config():
     Explain the key LoRA hyperparameters.
     """
     print("\n" + "=" * 60)
-    print("LoRA Configuration Explained")
+    print("Part 1: LoRA Configuration Explained")
     print("=" * 60)
 
     config_explanation = """
@@ -85,27 +167,81 @@ def explain_lora_config():
     task_type: "CAUSAL_LM", "SEQ_CLS", etc.
         - Must match your task
         - CAUSAL_LM for text generation
+
+    Memory Savings:
+    ---------------
+    LoRA typically trains only 0.1-1% of model parameters!
+
+    Example for 7B model:
+    - Full fine-tuning: 7B parameters
+    - LoRA (r=8): ~8M parameters (0.1%)
+    - LoRA (r=64): ~67M parameters (1%)
     """
     print(config_explanation)
 
 
 # =============================================================================
-# Part 2: Basic LoRA Setup
+# Part 2: Dataset Options
 # =============================================================================
 
-def setup_lora_model():
+def load_dataset_option():
+    """Load dataset - either HuggingFace or synthetic."""
+    from datasets import load_dataset, Dataset
+
+    print("\n" + "=" * 60)
+    print("Part 2: Loading Dataset")
+    print("=" * 60)
+
+    print("\nDataset options:")
+    print("  1. Synthetic Q&A (fast, no download)")
+    print("  2. HuggingFace: databricks/databricks-dolly-15k (instruction following)")
+    print("  3. HuggingFace: OpenAssistant conversations")
+
+    # Use synthetic for demonstration
+    print("\nUsing: Synthetic Q&A dataset (for speed)")
+
+    data = [
+        {"text": "Question: What is Python?\nAnswer: Python is a high-level programming language known for its simplicity and readability."},
+        {"text": "Question: Explain machine learning.\nAnswer: Machine learning is a branch of AI where computers learn patterns from data without explicit programming."},
+        {"text": "Question: What is a database?\nAnswer: A database is an organized collection of structured data stored electronically and accessed via a database management system."},
+        {"text": "Question: Define API.\nAnswer: An API (Application Programming Interface) is a set of protocols that allows different software applications to communicate."},
+        {"text": "Question: What is cloud computing?\nAnswer: Cloud computing delivers computing services over the internet, including storage, processing, and software."},
+        {"text": "Question: Explain Docker.\nAnswer: Docker is a platform for developing, shipping, and running applications in isolated containers."},
+        {"text": "Question: What is Git?\nAnswer: Git is a distributed version control system for tracking changes in source code during software development."},
+        {"text": "Question: Define REST API.\nAnswer: REST API is an architectural style for building web services that use HTTP requests to access and manipulate data."},
+    ] * 15  # 120 examples
+
+    dataset = Dataset.from_list(data)
+
+    print(f"\nDataset loaded: {len(dataset)} examples")
+    print(f"Sample: {data[0]['text'][:100]}...")
+
+    # Show how to load HuggingFace datasets
+    print("\n" + "-" * 40)
+    print("To use HuggingFace datasets:")
+    print("  dataset = load_dataset('databricks/databricks-dolly-15k', split='train')")
+    print("  # Format the data appropriately for your task")
+
+    return dataset
+
+
+# =============================================================================
+# Part 3: Basic LoRA Setup
+# =============================================================================
+
+def setup_lora_model(gpu_config):
     """
     Set up a model with LoRA adapters.
     """
     print("\n" + "=" * 60)
-    print("Setting Up LoRA Model")
+    print("Part 3: Setting Up LoRA Model")
     print("=" * 60)
 
     from transformers import AutoTokenizer, AutoModelForCausalLM
-    from peft import LoraConfig, get_peft_model, TaskType
+    from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
 
     # Use a small model for demonstration
-    model_name = "distilgpt2"
+    model_name = "distilgpt2"  # ~82M params, works on CPU/small GPU
 
     print(f"\nLoading base model: {model_name}")
 
@@ -114,11 +250,28 @@ def setup_lora_model():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load base model
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float32,
-    )
+    # Load base model with appropriate settings
+    load_kwargs = {
+        'pretrained_model_name_or_path': model_name,
+        'torch_dtype': torch.float16 if gpu_config['use_fp16'] else torch.float32,
+    }
+
+    # Add 8-bit quantization if needed (for very small VRAM)
+    if gpu_config['use_8bit']:
+        try:
+            from transformers import BitsAndBytesConfig
+            load_kwargs['quantization_config'] = BitsAndBytesConfig(load_in_8bit=True)
+            load_kwargs['device_map'] = 'auto'
+            print("  Using 8-bit quantization for memory efficiency")
+        except ImportError:
+            print("  Install bitsandbytes for 8-bit: pip install bitsandbytes")
+            gpu_config['use_8bit'] = False
+
+    model = AutoModelForCausalLM.from_pretrained(**load_kwargs)
+
+    # Prepare model for k-bit training if quantized
+    if gpu_config['use_8bit']:
+        model = prepare_model_for_kbit_training(model)
 
     print(f"Base model parameters: {model.num_parameters():,}")
 
@@ -150,51 +303,45 @@ def setup_lora_model():
     print(f"  - Trainable parameters: {trainable_params:,}")
     print(f"  - Trainable %: {100 * trainable_params / total_params:.2f}%")
 
+    # Enable gradient checkpointing for memory efficiency
+    if gpu_config['gradient_checkpointing']:
+        model.enable_input_require_grads()
+        if hasattr(model.base_model, 'gradient_checkpointing_enable'):
+            model.base_model.gradient_checkpointing_enable()
+            print("  - Gradient checkpointing: Enabled")
+
     return model, tokenizer, lora_config
 
 
 # =============================================================================
-# Part 3: Training with LoRA
+# Part 4: Training with LoRA
 # =============================================================================
-
-def create_sample_dataset():
-    """Create a sample dataset for fine-tuning."""
-    from datasets import Dataset
-
-    data = [
-        {"text": "Question: What is Python?\nAnswer: Python is a high-level programming language known for its simplicity and readability."},
-        {"text": "Question: Explain machine learning.\nAnswer: Machine learning is a branch of AI where computers learn patterns from data without explicit programming."},
-        {"text": "Question: What is a database?\nAnswer: A database is an organized collection of structured data stored electronically and accessed via a database management system."},
-        {"text": "Question: Define API.\nAnswer: An API (Application Programming Interface) is a set of protocols that allows different software applications to communicate."},
-        {"text": "Question: What is cloud computing?\nAnswer: Cloud computing delivers computing services over the internet, including storage, processing, and software."},
-    ] * 20  # 100 examples
-
-    return Dataset.from_list(data)
-
 
 def train_with_lora():
     """
     Complete LoRA training pipeline.
     """
     print("\n" + "=" * 60)
-    print("Training with LoRA")
+    print("Part 4: Training with LoRA")
     print("=" * 60)
 
     from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
-    from peft import get_peft_model, LoraConfig, TaskType
+
+    # Detect GPU and get optimized config
+    gpu_config = detect_gpu_vram()
 
     # Setup model
-    model, tokenizer, lora_config = setup_lora_model()
+    model, tokenizer, lora_config = setup_lora_model(gpu_config)
 
     # Prepare dataset
     print("\nPreparing dataset...")
-    dataset = create_sample_dataset()
+    dataset = load_dataset_option()
 
     def tokenize_function(examples):
         tokenized = tokenizer(
             examples["text"],
             truncation=True,
-            max_length=256,
+            max_length=gpu_config['max_length'],
             padding="max_length",
         )
         tokenized["labels"] = tokenized["input_ids"].copy()
@@ -209,22 +356,22 @@ def train_with_lora():
     # Data collator
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    # Training arguments (optimized for LoRA)
+    # Training arguments (optimized for LoRA and GPU)
     training_args = TrainingArguments(
         output_dir="./lora_output",
-        num_train_epochs=3,
-        per_device_train_batch_size=8,  # Can use larger batches with LoRA!
-        per_device_eval_batch_size=8,
-        gradient_accumulation_steps=2,
+        num_train_epochs=1,  # Quick training for demo
+        per_device_train_batch_size=gpu_config['batch_size'],
+        per_device_eval_batch_size=gpu_config['batch_size'],
+        gradient_accumulation_steps=4 // gpu_config['batch_size'],  # Effective batch size of 4
         learning_rate=2e-4,  # LoRA can use higher LR
         warmup_ratio=0.1,
         logging_steps=10,
         eval_strategy="steps",
         eval_steps=50,
-        save_strategy="steps",
-        save_steps=100,
-        fp16=torch.cuda.is_available(),
+        save_strategy="epoch",
+        fp16=gpu_config['use_fp16'],
         report_to="none",
+        gradient_checkpointing=gpu_config['gradient_checkpointing'],
     )
 
     # Trainer
@@ -237,20 +384,32 @@ def train_with_lora():
         data_collator=data_collator,
     )
 
-    print("\nReady to train!")
-    print("(Uncomment trainer.train() to actually run training)")
+    print("\nTrainer ready!")
+    print(f"Training config:")
+    print(f"  - Device: {gpu_config['device']}")
+    print(f"  - Batch size: {gpu_config['batch_size']}")
+    print(f"  - Max length: {gpu_config['max_length']}")
+    print(f"  - FP16: {gpu_config['use_fp16']}")
+    print(f"  - Gradient checkpointing: {gpu_config['gradient_checkpointing']}")
 
-    # Uncomment to train:
-    # trainer.train()
+    if RUN_TRAINING:
+        print("\n>>> Running LoRA training (1 epoch)...")
+        trainer.train()
+        print(">>> LoRA training complete!")
 
-    # Save LoRA adapters only (very small!)
-    # model.save_pretrained("./lora_adapters")
+        # Save LoRA adapters only (very small!)
+        model.save_pretrained("./lora_adapters")
+        print("\n>>> LoRA adapters saved to ./lora_adapters/")
+        print(f"    Adapter size: Only the LoRA weights (~few MB)")
+    else:
+        print("\nTo train: trainer.train()")
+        print("To save adapters: model.save_pretrained('./lora_adapters')")
 
     return model, tokenizer
 
 
 # =============================================================================
-# Part 4: QLoRA (Quantized LoRA) - For Large Models
+# Part 5: QLoRA (Quantized LoRA) - For Large Models
 # =============================================================================
 
 def setup_qlora():
@@ -264,11 +423,20 @@ def setup_qlora():
     This allows fine-tuning 7B-70B models on a single GPU!
     """
     print("\n" + "=" * 60)
-    print("QLoRA Setup (for Large Models)")
+    print("Part 5: QLoRA Setup (for Large Models)")
     print("=" * 60)
 
     if not torch.cuda.is_available():
         print("\nQLoRA requires CUDA. Showing configuration only...")
+        show_qlora_config()
+        return None, None
+
+    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+
+    # Only attempt to load large models if we have enough VRAM
+    if vram_gb < 6:
+        print(f"\nVRAM ({vram_gb:.1f}GB) too low for QLoRA demo.")
+        print("QLoRA is for large models (7B+) that need 6GB+ VRAM.")
         show_qlora_config()
         return None, None
 
@@ -277,16 +445,14 @@ def setup_qlora():
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
     except ImportError:
         print("Install bitsandbytes: pip install bitsandbytes")
+        show_qlora_config()
         return None, None
 
-    # For demonstration, use a small model
-    # In practice, use larger models like:
-    # - "meta-llama/Llama-2-7b-hf"
-    # - "mistralai/Mistral-7B-v0.1"
-    # - "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    # Use TinyLlama for demonstration (1.1B params)
     model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
     print(f"\nLoading {model_name} with 4-bit quantization...")
+    print("(This would work similarly for Llama-2-7B, Mistral-7B, etc.)")
 
     # 4-bit quantization config
     bnb_config = BitsAndBytesConfig(
@@ -296,51 +462,58 @@ def setup_qlora():
         bnb_4bit_use_double_quant=True,      # Nested quantization
     )
 
-    # Load quantized model
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-    )
+    try:
+        # Load quantized model
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,
+        )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
 
-    # Prepare model for k-bit training
-    model = prepare_model_for_kbit_training(model)
+        # Prepare model for k-bit training
+        model = prepare_model_for_kbit_training(model)
 
-    # LoRA config for QLoRA
-    lora_config = LoraConfig(
-        r=16,                   # Slightly higher rank for large models
-        lora_alpha=32,
-        target_modules=[        # Target attention and FFN
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
-        lora_dropout=0.05,
-        bias="none",
-        task_type=TaskType.CAUSAL_LM,
-    )
+        # LoRA config for QLoRA
+        lora_config = LoraConfig(
+            r=16,                   # Slightly higher rank for large models
+            lora_alpha=32,
+            target_modules=[        # Target attention and FFN
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj",
+            ],
+            lora_dropout=0.05,
+            bias="none",
+            task_type=TaskType.CAUSAL_LM,
+        )
 
-    # Apply LoRA
-    model = get_peft_model(model, lora_config)
+        # Apply LoRA
+        model = get_peft_model(model, lora_config)
 
-    # Print stats
-    print(f"\nModel memory: {model.get_memory_footprint() / 1024**2:.1f} MB")
-    model.print_trainable_parameters()
+        # Print stats
+        print(f"\nModel memory: {model.get_memory_footprint() / 1024**2:.1f} MB")
+        model.print_trainable_parameters()
 
-    return model, tokenizer
+        return model, tokenizer
+    except Exception as e:
+        print(f"\nCouldn't load model: {e}")
+        print("This is normal if you have limited VRAM.")
+        show_qlora_config()
+        return None, None
 
 
 def show_qlora_config():
     """Show QLoRA configuration without running it."""
+    print("\nQLoRA Configuration Example:")
     config_code = '''
-    # QLoRA Configuration Example
+    # QLoRA enables fine-tuning 7B-70B models on consumer GPUs!
 
-    from transformers import BitsAndBytesConfig
-    from peft import LoraConfig, prepare_model_for_kbit_training
+    from transformers import BitsAndBytesConfig, AutoModelForCausalLM
+    from peft import LoraConfig, prepare_model_for_kbit_training, get_peft_model
 
     # 4-bit quantization
     bnb_config = BitsAndBytesConfig(
@@ -371,16 +544,16 @@ def show_qlora_config():
 
     model = get_peft_model(model, lora_config)
 
-    # Memory comparison:
-    # - Llama-2-7B full precision: ~28 GB
-    # - Llama-2-7B 4-bit: ~4 GB
-    # - Llama-2-7B 4-bit + LoRA training: ~6-8 GB
+    # Memory comparison (Llama-2-7B):
+    # - Full precision: ~28 GB
+    # - 4-bit: ~4 GB
+    # - 4-bit + LoRA training: ~6-8 GB ✓ Fits on RTX 3060!
     '''
     print(config_code)
 
 
 # =============================================================================
-# Part 5: Loading and Using LoRA Adapters
+# Part 6: Loading and Using LoRA Adapters
 # =============================================================================
 
 def using_lora_adapters():
@@ -388,7 +561,7 @@ def using_lora_adapters():
     How to save, load, and use LoRA adapters.
     """
     print("\n" + "=" * 60)
-    print("Using LoRA Adapters")
+    print("Part 6: Using LoRA Adapters")
     print("=" * 60)
 
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -415,22 +588,16 @@ def using_lora_adapters():
     print("   model.save_pretrained('./my_lora_adapters')")
     print("   # This creates a small folder (~few MB)")
 
-    # In practice:
-    # lora_model.save_pretrained("./my_lora_adapters")
-
     print("\n2. Loading LoRA adapters onto base model:")
-    print("   base_model = AutoModelForCausalLM.from_pretrained('gpt2')")
+    print("   base_model = AutoModelForCausalLM.from_pretrained('distilgpt2')")
     print("   model = PeftModel.from_pretrained(base_model, './my_lora_adapters')")
-
-    # In practice:
-    # loaded_model = PeftModel.from_pretrained(base_model, "./my_lora_adapters")
 
     print("\n3. Merging adapters into base model (for deployment):")
     print("   merged_model = model.merge_and_unload()")
     print("   merged_model.save_pretrained('./merged_model')")
     print("   # Now it's a regular model, no PEFT dependency needed")
 
-    print("\n4. Switching between adapters:")
+    print("\n4. Switching between adapters (multi-task):")
     print("   model.load_adapter('./adapter_1', adapter_name='task1')")
     print("   model.load_adapter('./adapter_2', adapter_name='task2')")
     print("   model.set_adapter('task1')  # Use task1 adapter")
@@ -462,18 +629,50 @@ def using_lora_adapters():
 
 def main():
     """Run the LoRA tutorial."""
+    global RUN_TRAINING
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="LoRA Fine-Tuning Tutorial",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python lora_finetuning.py           # Show tutorial (no training)
+  python lora_finetuning.py --train   # Actually run training (1 epoch)
+        """
+    )
+    parser.add_argument(
+        "--train",
+        action="store_true",
+        help="Actually run training (1 epoch). Without this flag, only shows setup."
+    )
+    args = parser.parse_args()
+
+    RUN_TRAINING = args.train
+
     print("=" * 60)
     print("LoRA Fine-Tuning Tutorial")
     print("=" * 60)
 
+    if RUN_TRAINING:
+        print("\n*** TRAINING MODE: Will run actual training (1 epoch) ***\n")
+    else:
+        print("\n*** DEMO MODE: Showing setup only. Use --train to run training ***\n")
+
     if not check_dependencies():
         return
 
-    # Run tutorial sections
-    explain_lora_config()
-    model, tokenizer = train_with_lora()
-    setup_qlora()
-    using_lora_adapters()
+    try:
+        # Run tutorial sections
+        explain_lora_config()
+        model, tokenizer = train_with_lora()
+        setup_qlora()
+        using_lora_adapters()
+
+    except Exception as e:
+        print(f"\nError: {e}")
+        import traceback
+        traceback.print_exc()
 
     print("\n" + "=" * 60)
     print("Tutorial Complete!")
@@ -482,16 +681,25 @@ def main():
     Summary:
     --------
     1. LoRA trains only 0.1-1% of parameters
-    2. Much faster and uses less memory
-    3. QLoRA adds 4-bit quantization for large models
-    4. Adapters are small and easy to share
-    5. Can merge adapters back into base model
+    2. Much faster and uses less memory than full fine-tuning
+    3. Automatic GPU detection and VRAM optimization
+    4. QLoRA adds 4-bit quantization for large models
+    5. Adapters are small (~few MB) and easy to share
+    6. Can merge adapters back into base model for deployment
+
+    Memory Requirements:
+    -------------------
+    - CPU/No GPU: Works! (slower, uses synthetic data)
+    - <4GB VRAM: 8-bit quantization + small batches
+    - 4-8GB VRAM: FP16 + gradient checkpointing
+    - 8-12GB VRAM: Standard LoRA training
+    - 12GB+ VRAM: Can train larger models with QLoRA
 
     Next steps:
-    - Try training with your own data
+    - Try: python lora_finetuning.py --train
+    - Use your own dataset from HuggingFace
     - Experiment with different ranks (r) and alpha values
-    - Use QLoRA for 7B+ models
-    - Check out the TRL library for RLHF
+    - Try QLoRA for 7B+ models if you have 8GB+ VRAM
     """)
 
 

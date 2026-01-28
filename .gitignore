@@ -90,3 +90,8 @@ wandb/
 
 # MLflow
 mlruns/
+
+# TRL/HuggingFace training outputs
+*_output/
+*_trl_output/
+trainer_output/
