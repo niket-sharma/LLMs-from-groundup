@@ -624,6 +624,185 @@ def using_lora_adapters():
 
 
 # =============================================================================
+# Part 7: DPO + LoRA - Best of Both Worlds
+# =============================================================================
+
+def dpo_with_lora():
+    """
+    Combine DPO (Direct Preference Optimization) with LoRA.
+
+    This is a powerful combination:
+    - DPO: Simple alignment method, no reward model needed
+    - LoRA: Memory-efficient, trains only 0.1-1% of parameters
+
+    Use case: Align a model to preferences with minimal memory.
+    """
+    print("\n" + "=" * 60)
+    print("Part 7: DPO + LoRA (Preference Alignment)")
+    print("=" * 60)
+
+    print("\nWhy DPO + LoRA?")
+    print("  ✓ DPO is simpler than PPO (no reward model, no RL instability)")
+    print("  ✓ LoRA makes it memory-efficient")
+    print("  ✓ Perfect for aligning models on consumer GPUs")
+    print("  ✓ Used in production by many companies")
+
+    try:
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_kbit_training
+        from trl import DPOConfig, DPOTrainer
+        from datasets import Dataset
+    except ImportError as e:
+        print(f"\nMissing package: {e}")
+        print("Install: pip install trl")
+        return None, None
+
+    # Detect GPU config
+    gpu_config = detect_gpu_vram()
+
+    model_name = "distilgpt2"
+    print(f"\nLoading model: {model_name}")
+
+    # Load model and tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Load base model
+    load_kwargs = {
+        'pretrained_model_name_or_path': model_name,
+        'torch_dtype': torch.float16 if gpu_config['use_fp16'] else torch.float32,
+    }
+
+    model = AutoModelForCausalLM.from_pretrained(**load_kwargs)
+
+    # Reference model (frozen) - DPO needs this for KL penalty
+    ref_model = AutoModelForCausalLM.from_pretrained(**load_kwargs)
+
+    print(f"Model parameters: {model.num_parameters():,}")
+
+    # Apply LoRA to the main model (not reference model)
+    lora_config = LoraConfig(
+        r=16,                       # Higher rank for alignment
+        lora_alpha=32,
+        target_modules=["c_attn"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+
+    model = get_peft_model(model, lora_config)
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+
+    print(f"\nAfter LoRA:")
+    print(f"  - Trainable: {trainable_params:,} ({100 * trainable_params / total_params:.2f}%)")
+
+    # Enable gradient checkpointing if needed
+    if gpu_config['gradient_checkpointing']:
+        model.enable_input_require_grads()
+        if hasattr(model.base_model, 'gradient_checkpointing_enable'):
+            model.base_model.gradient_checkpointing_enable()
+
+    # Create preference dataset
+    # Format: prompt, chosen (better response), rejected (worse response)
+    print("\nCreating preference dataset...")
+
+    preference_data = [
+        {
+            "prompt": "Explain what Python is.",
+            "chosen": "Python is a high-level, interpreted programming language known for its clear syntax and readability. It supports multiple programming paradigms and has extensive libraries for various applications.",
+            "rejected": "python is a programming language i guess",
+        },
+        {
+            "prompt": "What is machine learning?",
+            "chosen": "Machine learning is a subset of artificial intelligence where systems learn patterns from data to make predictions or decisions without being explicitly programmed for each specific task.",
+            "rejected": "ml is when computers do stuff automatically",
+        },
+        {
+            "prompt": "Explain how a computer works.",
+            "chosen": "A computer processes data using a CPU (central processing unit) that executes instructions stored in memory. It takes input from devices, processes it according to programs, and produces output.",
+            "rejected": "computers work by doing calculations fast",
+        },
+        {
+            "prompt": "What is an API?",
+            "chosen": "An API (Application Programming Interface) is a set of protocols and tools that allows different software applications to communicate with each other. It defines methods for requesting and exchanging data.",
+            "rejected": "api is how programs talk i think",
+        },
+    ] * 10  # 40 examples
+
+    dataset = Dataset.from_list(preference_data)
+
+    print(f"Dataset size: {len(dataset)} preference pairs")
+    print("\nExample preference pair:")
+    print(f"  Prompt: {preference_data[0]['prompt']}")
+    print(f"  Chosen: {preference_data[0]['chosen'][:60]}...")
+    print(f"  Rejected: {preference_data[0]['rejected'][:60]}...")
+
+    # DPO Config
+    dpo_config = DPOConfig(
+        output_dir="./dpo_lora_output",
+        num_train_epochs=1,
+        per_device_train_batch_size=gpu_config['batch_size'],
+        gradient_accumulation_steps=2,
+        learning_rate=5e-5,  # Lower LR for DPO
+        beta=0.1,  # DPO temperature (controls strength of preference)
+        max_length=gpu_config['max_length'],
+        max_prompt_length=gpu_config['max_length'] // 2,
+        logging_steps=5,
+        fp16=gpu_config['use_fp16'],
+        report_to="none",
+        remove_unused_columns=False,
+    )
+
+    print(f"\nDPO Config:")
+    print(f"  - Beta (temperature): {dpo_config.beta}")
+    print(f"  - Learning rate: {dpo_config.learning_rate}")
+    print(f"  - Batch size: {dpo_config.per_device_train_batch_size}")
+
+    # Create DPO Trainer
+    trainer = DPOTrainer(
+        model=model,
+        ref_model=ref_model,
+        args=dpo_config,
+        train_dataset=dataset,
+        processing_class=tokenizer,
+    )
+
+    print("\nDPOTrainer with LoRA ready!")
+
+    print("\nHow DPO works:")
+    print("  1. For each (prompt, chosen, rejected) pair:")
+    print("  2. Compute log probabilities: log π(chosen) and log π(rejected)")
+    print("  3. Loss = -log σ(β * [log π(chosen) - log π(rejected)])")
+    print("  4. This directly optimizes the policy from preferences!")
+    print("  5. No reward model needed, more stable than PPO")
+
+    if RUN_TRAINING:
+        print("\n>>> Running DPO + LoRA training (1 epoch)...")
+        trainer.train()
+        print(">>> DPO + LoRA training complete!")
+
+        # Save LoRA adapters
+        model.save_pretrained("./dpo_lora_adapters")
+        print("\n>>> DPO-aligned LoRA adapters saved to ./dpo_lora_adapters/")
+    else:
+        print("\nTo train: trainer.train()")
+        print("To save: model.save_pretrained('./dpo_lora_adapters')")
+
+    print("\n" + "-" * 40)
+    print("Use cases for DPO + LoRA:")
+    print("  • Align models to be more helpful/harmless")
+    print("  • Improve response quality with preference data")
+    print("  • Style transfer (formal vs casual)")
+    print("  • Domain adaptation with expert preferences")
+    print("  • Fine-tune on consumer GPU (4-8GB VRAM)")
+
+    return model, tokenizer
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -668,6 +847,7 @@ Examples:
         model, tokenizer = train_with_lora()
         setup_qlora()
         using_lora_adapters()
+        dpo_with_lora()
 
     except Exception as e:
         print(f"\nError: {e}")
@@ -686,6 +866,14 @@ Examples:
     4. QLoRA adds 4-bit quantization for large models
     5. Adapters are small (~few MB) and easy to share
     6. Can merge adapters back into base model for deployment
+    7. DPO + LoRA combines preference optimization with efficiency
+
+    What You Learned:
+    ----------------
+    • Basic LoRA: Parameter-efficient fine-tuning
+    • QLoRA: 4-bit quantization for 7B+ models
+    • DPO + LoRA: Preference alignment with minimal memory
+    • Adapter management: Save, load, merge, multi-task
 
     Memory Requirements:
     -------------------
@@ -699,6 +887,7 @@ Examples:
     - Try: python lora_finetuning.py --train
     - Use your own dataset from HuggingFace
     - Experiment with different ranks (r) and alpha values
+    - Try DPO + LoRA for alignment tasks
     - Try QLoRA for 7B+ models if you have 8GB+ VRAM
     """)
 
