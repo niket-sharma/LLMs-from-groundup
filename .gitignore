@@ -95,3 +95,6 @@ mlruns/
 *_output/
 *_trl_output/
 trainer_output/
+*_adapters/
+*_model/
+merged_model/
