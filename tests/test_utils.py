@@ -1,6 +1,4 @@
-import pytest
 import torch
-import tempfile
 import os
 import sys
 

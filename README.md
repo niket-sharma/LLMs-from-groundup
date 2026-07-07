@@ -1,268 +1,119 @@
-# Small GPT: LLMs from Ground Up
+# LLMs from the Ground Up
 
-A minimal implementation of a GPT-style transformer language model built from scratch using PyTorch. This project provides a complete implementation including the model architecture, training utilities, inference capabilities, and comprehensive tests.
+[![CI](https://github.com/niket-sharma/LLMs-from-groundup/actions/workflows/ci.yml/badge.svg)](https://github.com/niket-sharma/LLMs-from-groundup/actions/workflows/ci.yml)
 
-## 🚀 Features
+A hands-on AI Engineer curriculum built around a GPT implemented from scratch
+in PyTorch — from tokenizers and attention up through inference optimization,
+modern architectures, scaling, post-training, and serving. Every concept ships
+as a heavily-commented implementation, a correctness test against a naive
+reference, and a benchmark that proves the claimed win.
 
-- **Complete GPT Architecture**: Multi-head attention, feed-forward networks, layer normalization, positional embeddings
-- **Training Pipeline**: Data loading, tokenization, training loop with validation
-- **Text Generation**: Support for various sampling strategies (temperature, top-k, top-p)
-- **Comprehensive Tests**: Unit tests for all components
-- **Examples**: Training scripts, inference examples, and Jupyter notebook demo
-- **Modular Design**: Clean, extensible codebase with separation of concerns
+The full roadmap lives in [`llm-engineer-enhancement.md`](llm-engineer-enhancement.md).
 
-## 📁 Project Structure
+## Curriculum Map
 
-```
-LLMs-from-groundup/
-├── src/
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── attention.py      # Multi-head attention mechanisms
-│   │   ├── embeddings.py     # Token and positional embeddings
-│   │   ├── feedforward.py    # Feed-forward networks and transformer blocks
-│   │   └── gpt.py           # Main GPT model implementation
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── dataset.py       # Data loading and tokenization
-│   │   └── trainer.py       # Training utilities and trainer class
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── inference.py     # Text generation and inference utilities
-│   │   └── helpers.py       # Helper functions and utilities
-│   └── __init__.py
-├── tests/
-│   ├── __init__.py
-│   ├── test_models.py       # Tests for model components
-│   ├── test_training.py     # Tests for training utilities
-│   └── test_utils.py        # Tests for utility functions
-├── examples/
-│   ├── train_example.py     # Training script example
-│   ├── inference_example.py # Inference script example
-│   └── jupyter_demo.ipynb   # Interactive Jupyter notebook demo
-├── requirements.txt         # Python dependencies
-├── LICENSE                  # MIT License
-└── README.md               # This file
-```
+| Module | Topic | Covers | Status |
+|---|---|---|---|
+| **Phase 0** | Foundation | Config-driven model factory, presets, CI, benchmarking harness | ✅ |
+| **M1** | `modules/m1_fundamentals/` | BPE tokenizer from scratch, sinusoidal/RoPE, RMSNorm, SwiGLU, attention anatomy | 🔜 |
+| **M2** | `modules/m2_inference_opt/` | KV cache, MQA/GQA/MLA, FlashAttention, PagedAttention, continuous batching, speculative decoding | 🔜 |
+| **M3** | `modules/m3_architectures/` | Mixture of Experts, Mamba/SSM, linear attention, diffusion LMs | 🔜 |
+| **M4** | `modules/m4_training_scaling/` | Mixed precision, sequence packing, data pipelines, scaling laws | 🔜 |
+| **M5** | `modules/m5_post_training/` | SFT, reward modeling, DPO, GRPO — from scratch on this repo's own GPT | 🔜 |
+| **M6** | `modules/m6_serving/` | Quantization, distillation, FastAPI + continuous batching server, vLLM | 🔜 |
 
-## 🛠 Installation
+Library-based counterparts (TRL fine-tuning, LoRA, RLHF, API usage) live in
+[`practical_llms/`](practical_llms/) — M5/M6 cross-link to them as the
+"production" versions of the from-scratch implementations.
 
-1. Clone the repository:
+## Hardware Requirements
+
+Everything runs on a single 8 GB NVIDIA GPU (WSL2/Linux, 32 GB RAM):
+full-precision training up to ~124M params, quantized inference up to ~7B.
+Tests and smoke benchmarks run CPU-only.
+
+## Quick Start
+
 ```bash
-git clone https://github.com/your-username/LLMs-from-groundup.git
-cd LLMs-from-groundup
+pip install -e ".[dev]"   # core + test/lint tooling
+make test                 # CPU test suite
+make bench-smoke          # sanity benchmark (writes benchmarks/results/)
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+### Build a model
 
-## 🚀 Quick Start
-
-### Training a Model
+Models are config-driven; every architectural knob (positional encoding,
+norm, activation, attention variant) is a `GPTConfig` field:
 
 ```python
-from src.models.gpt import create_small_gpt
-from src.training.dataset import prepare_data, create_dataloaders
-from src.training.trainer import GPTTrainer
+import sys; sys.path.insert(0, "src")
+from models import GPTConfig, create_model
 
-# Prepare data
-train_dataset, val_dataset, tokenizer = prepare_data('your_text_file.txt')
-train_loader, val_loader = create_dataloaders(train_dataset, val_dataset)
-
-# Create model
-config = {
-    'vocab_size': tokenizer.vocab_size,
-    'd_model': 384,
-    'n_heads': 6,
-    'n_layers': 6,
-    'max_seq_len': 1024
-}
-model = create_small_gpt(config)
-
-# Train
-trainer = GPTTrainer(model, train_loader, val_loader)
-trainer.train(epochs=10, save_dir='checkpoints')
+model = create_model("tiny")                          # preset by name
+model = create_model(GPTConfig(preset="base"))        # ~50M non-embedding params
+model = create_model(GPTConfig(d_model=256, n_heads=8, vocab_size=5000))
 ```
 
-### Generating Text
+Presets: `tiny` (~1M), `small` (~10M), `base` (~50M), `gpt2-ish` (~124M).
+
+### Train and generate
+
+```bash
+python examples/train_example.py      # end-to-end char-level training demo
+python examples/inference_example.py  # sampling strategies demo
+```
 
 ```python
-from src.utils.inference import GPTInference
+from models import create_model, GPTConfig
+from training.dataset import prepare_data, create_dataloaders
+from training.trainer import GPTTrainer
 
-# Load trained model and tokenizer
-inference = GPTInference(model, tokenizer)
+train_ds, val_ds, tokenizer = prepare_data("your_text.txt")
+train_loader, val_loader = create_dataloaders(train_ds, val_ds)
 
-# Generate text
-generated = inference.generate(
-    "Once upon a time",
-    max_new_tokens=100,
-    temperature=0.8
-)
-print(generated)
+model = create_model(GPTConfig(preset="tiny", vocab_size=tokenizer.vocab_size))
+GPTTrainer(model, train_loader, val_loader).train(epochs=10, save_dir="checkpoints")
 ```
 
-## 📚 Examples
+## Repo Structure
 
-### 1. Training Example
-Run the complete training example:
+```
+src/
+├── models/        # GPT architecture: config.py, registry.py, attention, embeddings
+├── training/      # tokenizer, dataset, trainer
+└── utils/         # inference (sampling), helpers (seed, params, FLOPs)
+modules/           # curriculum modules M1–M6 (added per the roadmap)
+benchmarks/        # smoke.py + results/ (committed JSON/PNG)
+practical_llms/    # library-based track: APIs, TRL fine-tuning, RLHF/DPO/GRPO
+examples/          # runnable end-to-end scripts
+tests/             # pytest suite (CPU, runs in CI)
+visualizations/    # attention maps, embedding PCA, entropy analysis
+```
+
+Each `modules/mX_*/` folder follows a standard contract: `README.md`
+(concepts + interview questions), a from-scratch implementation,
+`benchmark.py`, and parity tests. **Golden rule:** prove correctness against
+the naive reference first, then prove the win with committed benchmark
+numbers.
+
+## Development
+
 ```bash
-python examples/train_example.py
+make test          # pytest tests/ -q
+make lint          # ruff check
+make format        # ruff format + autofix
+make bench-smoke   # tiny-model CPU benchmark
 ```
 
-### 2. Inference Example
-Generate text with a trained model:
-```bash
-python examples/inference_example.py
-```
+Agent/contributor conventions are in [`AGENTS.md`](AGENTS.md) (synced to
+`CLAUDE.md`, `GEMINI.md`, etc. via `scripts/sync_agent_docs.sh`).
 
-### 3. Jupyter Demo
-Open and run the interactive notebook:
-```bash
-jupyter notebook examples/jupyter_demo.ipynb
-```
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
-pytest tests/ -v
-```
-
-Run specific test modules:
-```bash
-pytest tests/test_models.py -v      # Test model components
-pytest tests/test_training.py -v    # Test training utilities
-pytest tests/test_utils.py -v       # Test utility functions
-```
-
-## 🏗 Model Architecture
-
-The Small GPT model implements the standard transformer decoder architecture:
-
-- **Multi-Head Attention**: Self-attention mechanism with causal masking
-- **Position-wise Feed-Forward**: Two-layer MLP with GELU activation
-- **Layer Normalization**: Pre-norm architecture for stable training
-- **Positional Embeddings**: Learnable position embeddings
-- **Weight Tying**: Shared weights between input and output embeddings
-
-### Default Configuration
-
-```python
-{
-    'vocab_size': 50257,      # Vocabulary size
-    'd_model': 384,           # Model dimension
-    'n_heads': 6,             # Number of attention heads
-    'n_layers': 6,            # Number of transformer layers
-    'd_ff': 1536,             # Feed-forward dimension
-    'max_seq_len': 1024,      # Maximum sequence length
-    'dropout': 0.1            # Dropout rate
-}
-```
-
-## 🎯 Key Components
-
-### 1. Attention Mechanism (`src/models/attention.py`)
-- Multi-head self-attention
-- Causal masking for autoregressive generation
-- Scaled dot-product attention
-
-### 2. Transformer Block (`src/models/feedforward.py`)
-- Self-attention + feed-forward
-- Residual connections
-- Layer normalization
-
-### 3. Embeddings (`src/models/embeddings.py`)
-- Token embeddings with scaling
-- Learnable positional embeddings
-- Dropout for regularization
-
-### 4. Training (`src/training/`)
-- Simple character-level tokenizer
-- DataLoader with proper batching
-- Training loop with validation
-- Gradient clipping and learning rate scheduling
-
-### 5. Inference (`src/utils/inference.py`)
-- Text generation with various sampling strategies
-- Temperature scaling
-- Top-k and top-p filtering
-- Batch generation support
-
-## 🔧 Customization
-
-### Creating Custom Model Configurations
-
-```python
-# Tiny model for experimentation
-tiny_config = {
-    'vocab_size': 1000,
-    'd_model': 128,
-    'n_heads': 4,
-    'n_layers': 4,
-    'd_ff': 512,
-    'max_seq_len': 256
-}
-
-# Larger model for better performance
-large_config = {
-    'vocab_size': 50257,
-    'd_model': 768,
-    'n_heads': 12,
-    'n_layers': 12,
-    'd_ff': 3072,
-    'max_seq_len': 2048
-}
-```
-
-### Custom Tokenizers
-
-You can replace the simple character-level tokenizer with more sophisticated options:
-- BPE (Byte-Pair Encoding)
-- SentencePiece
-- Hugging Face tokenizers
-
-## 📊 Performance Tips
-
-1. **Start Small**: Begin with a tiny model to verify your setup
-2. **Monitor Loss**: Watch both training and validation loss
-3. **Gradient Clipping**: Helps with training stability
-4. **Learning Rate**: Start with 1e-3 and adjust based on loss curves
-5. **Sequence Length**: Longer sequences require more memory
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📖 Educational Purpose
-
-This implementation is designed for educational purposes to understand:
-- Transformer architecture from first principles
-- Self-attention mechanisms
-- Autoregressive language modeling
-- Training procedures for language models
-- Text generation techniques
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
+## References
 
 - Attention Is All You Need (Vaswani et al., 2017)
 - Language Models are Unsupervised Multitask Learners (Radford et al., 2019)
-- PyTorch documentation and tutorials
-- The transformer community for open research
+- Training Compute-Optimal Large Language Models (Hoffmann et al., 2022)
 
-## 📧 Contact
+## License
 
-For questions or suggestions, please open an issue on GitHub.
-
----
-
-**Happy Learning! 🚀**
+MIT — see [LICENSE](LICENSE).

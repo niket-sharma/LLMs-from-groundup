@@ -30,11 +30,12 @@ MANIFEST
 # Data
 data/
 
-# Checkpoints and saved models
+# Checkpoints and saved models (binary artifacts stay out of git history)
 checkpoints/
-saved_models/*.pt
-saved_models/*.pth
+saved_models/
 *.ckpt
+*.pkl
+*.safetensors
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -98,3 +99,4 @@ trainer_output/
 *_adapters/
 *_model/
 merged_model/
+llm-engineer-enhancement.md

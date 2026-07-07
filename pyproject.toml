@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llms-from-groundup"
+version = "0.2.0"
+description = "LLMs from the ground up: a hands-on AI Engineer curriculum built around a small GPT"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Niket Sharma" }]
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.21.0",
+    "tqdm>=4.62.0",
+]
+
+[project.optional-dependencies]
+viz = [
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+    "scikit-learn>=1.0.0",
+]
+practical = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+    "transformers>=4.36.0",
+    "datasets>=2.16.0",
+    "accelerate>=0.25.0",
+    "peft>=0.7.0",
+    "trl>=0.7.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.4.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore::DeprecationWarning:torch.utils.data",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["venv", "practical_llms", "visualizations", "examples", "*.ipynb"]
+
+[tool.ruff.lint]
+# E4/E7/E9 + F: import hygiene, statement errors, syntax, undefined names.
+# Kept intentionally lean so `make lint` gates real problems, not style churn.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__ re-exports
+"src/**/__init__.py" = ["F401"]
