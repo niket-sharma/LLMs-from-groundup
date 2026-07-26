@@ -7,8 +7,8 @@
   "params_non_embedding": 793344,
   "flops_per_token_fwd": 1652224,
   "seq_len": 64,
-  "forward_pass_s": 0.0013,
+  "forward_pass_s": 0.004,
   "gen_tokens": 32,
-  "gen_tokens_per_s": 877.51,
+  "gen_tokens_per_s": 209.93,
   "torch_version": "2.9.1+cu128"
 }

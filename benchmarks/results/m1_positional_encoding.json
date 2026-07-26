@@ -1,0 +1,24 @@
+{
+  "benchmark": "positional_encoding_extrapolation",
+  "train_len": 128,
+  "eval_len": 256,
+  "train_steps": 400,
+  "results": {
+    "learned": {
+      "loss_at_train_len": 0.0053,
+      "loss_at_eval_len": 5.0388,
+      "extrapolation_gap": 5.0335
+    },
+    "sinusoidal": {
+      "loss_at_train_len": 4.8521,
+      "loss_at_eval_len": 4.852,
+      "extrapolation_gap": -0.0
+    },
+    "rope": {
+      "loss_at_train_len": 0.0049,
+      "loss_at_eval_len": 2.1922,
+      "extrapolation_gap": 2.1873
+    }
+  },
+  "rope_relative_property_deviation": 1.0728836059570312e-06
+}

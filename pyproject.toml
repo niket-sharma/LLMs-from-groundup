@@ -14,6 +14,7 @@ dependencies = [
     "torch>=2.0.0",
     "numpy>=1.21.0",
     "tqdm>=4.62.0",
+    "regex>=2023.0.0",   # GPT-2 pre-tokenization pattern in modules/m1 BPE tokenizer
 ]
 
 [project.optional-dependencies]
@@ -36,13 +37,19 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.4.0",
 ]
+# Optional reference tokenizers for modules/m1 tokenizer_comparison.py.
+# The benchmark degrades gracefully if these are absent.
+tokenizers = [
+    "tiktoken>=0.5.0",
+    "sentencepiece>=0.1.99",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+testpaths = ["tests", "modules"]
+pythonpath = ["src", "modules"]
 filterwarnings = [
     "ignore::DeprecationWarning:torch.utils.data",
 ]
@@ -60,3 +67,7 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.lint.per-file-ignores]
 # __init__ re-exports
 "src/**/__init__.py" = ["F401"]
+"modules/**/__init__.py" = ["F401"]
+# module tests / benchmarks import from a sys.path-injected package root
+"modules/**/test_*.py" = ["E402"]
+"modules/**/*.py" = ["E402"]

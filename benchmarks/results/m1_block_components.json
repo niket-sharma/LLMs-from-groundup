@@ -1,0 +1,21 @@
+{
+  "benchmark": "block_components",
+  "norm": {
+    "dim": 1024,
+    "layernorm_ms": 6.952,
+    "rmsnorm_ms": 16.6485,
+    "wall_clock_ratio": 0.418,
+    "layernorm_params": 2048,
+    "rmsnorm_params": 1024,
+    "param_reduction": 0.5,
+    "note": "wall-clock reflects kernel fusion, not FLOPs; RMSNorm wins on params/FLOPs"
+  },
+  "ffn": {
+    "d_model": 768,
+    "gelu_d_ff": 3072,
+    "swiglu_hidden": 2048,
+    "gelu_params": 4722432,
+    "swiglu_params": 4718592,
+    "param_ratio": 0.9992
+  }
+}

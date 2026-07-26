@@ -60,8 +60,12 @@ class GPTConfig:
 
     # Architectural knobs (implemented incrementally by modules M1/M2)
     pos_encoding: str = "learned"       # learned | sinusoidal | rope
+    rope_base: float = 10000.0          # RoPE frequency base (M1.2)
+    rope_scaling: str = "none"          # none | linear | ntk — context extension
+    rope_scale_factor: float = 1.0      # >1 extends context by this factor
     norm: str = "layernorm"             # layernorm | rmsnorm
     activation: str = "gelu"            # gelu | swiglu
+    qk_norm: bool = False               # RMSNorm on Q/K before attention (M1.3)
     attention: str = "mha"              # mha | mqa | gqa
     n_kv_heads: Optional[int] = None    # for gqa: kv heads; mqa forces 1
     use_kv_cache: bool = False          # M2.1

@@ -1,0 +1,46 @@
+{
+  "benchmark": "tokenizer_comparison",
+  "corpus": "sample_text.txt",
+  "corpus_chars": 13400,
+  "corpus_bytes": 13400,
+  "rows": [
+    {
+      "tokenizer": "char",
+      "vocab_size": 34,
+      "n_tokens": 13400,
+      "chars_per_token": 1.0,
+      "bytes_per_token": 1.0,
+      "seq_len_vs_char": 1.0
+    },
+    {
+      "tokenizer": "bpe-512",
+      "vocab_size": 512,
+      "n_tokens": 2960,
+      "train_s": 0.633,
+      "encode_s": 0.0463,
+      "chars_per_token": 4.527,
+      "bytes_per_token": 4.527,
+      "seq_len_vs_char": 0.221
+    },
+    {
+      "tokenizer": "bpe-1024",
+      "vocab_size": 543,
+      "n_tokens": 2341,
+      "train_s": 0.669,
+      "encode_s": 0.0497,
+      "chars_per_token": 5.724,
+      "bytes_per_token": 5.724,
+      "seq_len_vs_char": 0.175
+    },
+    {
+      "tokenizer": "bpe-2048",
+      "vocab_size": 543,
+      "n_tokens": 2341,
+      "train_s": 0.667,
+      "encode_s": 0.0453,
+      "chars_per_token": 5.724,
+      "bytes_per_token": 5.724,
+      "seq_len_vs_char": 0.175
+    }
+  ]
+}

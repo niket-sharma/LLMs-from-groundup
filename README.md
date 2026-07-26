@@ -15,7 +15,7 @@ The full roadmap lives in [`llm-engineer-enhancement.md`](llm-engineer-enhanceme
 | Module | Topic | Covers | Status |
 |---|---|---|---|
 | **Phase 0** | Foundation | Config-driven model factory, presets, CI, benchmarking harness | ✅ |
-| **M1** | `modules/m1_fundamentals/` | BPE tokenizer from scratch, sinusoidal/RoPE, RMSNorm, SwiGLU, attention anatomy | 🔜 |
+| **M1** | `modules/m1_fundamentals/` | BPE tokenizer from scratch, sinusoidal/RoPE, RMSNorm, SwiGLU, attention anatomy | ✅ |
 | **M2** | `modules/m2_inference_opt/` | KV cache, MQA/GQA/MLA, FlashAttention, PagedAttention, continuous batching, speculative decoding | 🔜 |
 | **M3** | `modules/m3_architectures/` | Mixture of Experts, Mamba/SSM, linear attention, diffusion LMs | 🔜 |
 | **M4** | `modules/m4_training_scaling/` | Mixed precision, sequence packing, data pipelines, scaling laws | 🔜 |

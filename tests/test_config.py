@@ -91,14 +91,18 @@ class TestCreateModel:
         assert model.d_model == 384
 
     def test_unimplemented_knob_raises(self):
-        for kwargs in (
-            {"pos_encoding": "rope"},
-            {"norm": "rmsnorm"},
-            {"activation": "swiglu"},
-            {"attention": "gqa", "n_kv_heads": 2},
-        ):
-            with pytest.raises(NotImplementedError):
-                create_model(GPTConfig(preset="tiny", **kwargs))
+        # Only GQA attention (M2.2) is still unimplemented. M1.2 added the
+        # positional encodings; M1.3 added rmsnorm/swiglu/qk_norm.
+        with pytest.raises(NotImplementedError):
+            create_model(GPTConfig(preset="tiny", attention="gqa", n_kv_heads=2))
+
+    def test_implemented_knobs_build(self):
+        # M1.2 + M1.3: these architectural knobs are now all instantiable.
+        for pe in ("learned", "sinusoidal", "rope"):
+            model = create_model(GPTConfig(preset="tiny", vocab_size=100, pos_encoding=pe))
+            assert (model.rope is not None) == (pe == "rope")
+        for kwargs in ({"norm": "rmsnorm"}, {"activation": "swiglu"}, {"qk_norm": True}):
+            create_model(GPTConfig(preset="tiny", vocab_size=100, **kwargs))
 
     def test_preset_sizes_ordered(self):
         sizes = {}

@@ -16,9 +16,9 @@ from .gpt import SmallGPT
 # outside these sets are valid *configurations* (they can be serialized,
 # compared, planned around) but cannot be instantiated yet.
 SUPPORTED = {
-    "pos_encoding": {"learned"},    # + "sinusoidal", "rope" in M1.2
-    "norm": {"layernorm"},          # + "rmsnorm" in M1.3
-    "activation": {"gelu"},         # + "swiglu" in M1.3
+    "pos_encoding": {"learned", "sinusoidal", "rope"},  # M1.2 ✅
+    "norm": {"layernorm", "rmsnorm"},                   # M1.3 ✅
+    "activation": {"gelu", "swiglu"},                   # M1.3 ✅
     "attention": {"mha"},           # + "mqa", "gqa" in M2.2
 }
 
@@ -57,6 +57,13 @@ def create_model(config: Union[GPTConfig, Dict[str, Any], str, None] = None) -> 
         d_ff=config.d_ff,
         max_seq_len=config.max_seq_len,
         dropout=config.dropout,
+        pos_encoding=config.pos_encoding,
+        rope_base=config.rope_base,
+        rope_scaling=config.rope_scaling,
+        rope_scale_factor=config.rope_scale_factor,
+        norm=config.norm,
+        activation=config.activation,
+        qk_norm=config.qk_norm,
     )
     # Attach the config so checkpointing/benchmarks can round-trip it.
     model.config = config

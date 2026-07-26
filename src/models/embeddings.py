@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import math
 
+from .rope import sinusoidal_positional_encoding
+
 
 class TokenEmbedding(nn.Module):
     """
@@ -96,14 +98,23 @@ class GPTEmbedding(nn.Module):
     """
     Combined embedding layer for GPT-style models.
 
-    Combines token embeddings with learned positional embeddings.
-    GPT uses learned positional embeddings rather than sinusoidal.
+    Supports three positional-encoding schemes (M1.2), selected by
+    ``pos_encoding``:
+
+    - ``"learned"`` (GPT-2 default): a trainable ``nn.Embedding`` over positions,
+      added to the token embedding. Simple, but has no representation for
+      positions beyond ``max_seq_len`` (no extrapolation).
+    - ``"sinusoidal"`` (original Transformer): a fixed sin/cos table added to the
+      token embedding. Parameter-free and defined for any position.
+    - ``"rope"``: **no** positional signal is added here — RoPE is applied to
+      Q/K inside attention. This layer then only returns token embeddings.
 
     Args:
         vocab_size: Size of the vocabulary
         d_model: Model/embedding dimension
         max_seq_len: Maximum sequence length
         dropout: Dropout probability
+        pos_encoding: "learned" | "sinusoidal" | "rope"
     """
 
     def __init__(
@@ -112,14 +123,29 @@ class GPTEmbedding(nn.Module):
         d_model: int,
         max_seq_len: int = 1024,
         dropout: float = 0.1,
+        pos_encoding: str = "learned",
     ):
         super().__init__()
+
+        self.pos_encoding = pos_encoding
 
         # Token embedding
         self.token_embedding = nn.Embedding(vocab_size, d_model)
 
-        # Learned positional embedding (GPT-style)
-        self.position_embedding = nn.Embedding(max_seq_len, d_model)
+        # Positional component depends on the scheme.
+        self.position_embedding = None
+        if pos_encoding == "learned":
+            # Learned positional embedding (GPT-style)
+            self.position_embedding = nn.Embedding(max_seq_len, d_model)
+        elif pos_encoding == "sinusoidal":
+            # Fixed sin/cos table stored as a (non-persistent) buffer.
+            pe = sinusoidal_positional_encoding(max_seq_len, d_model)
+            self.register_buffer("sinusoidal_pe", pe, persistent=False)
+        elif pos_encoding == "rope":
+            # Position is injected in attention; nothing to add here.
+            pass
+        else:
+            raise ValueError(f"unknown pos_encoding: {pos_encoding!r}")
 
         self.dropout = nn.Dropout(dropout)
         self.d_model = d_model
@@ -139,14 +165,12 @@ class GPTEmbedding(nn.Module):
         # Get token embeddings
         token_emb = self.token_embedding(x)
 
-        # Get position indices
-        positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
-        positions = positions.unsqueeze(0).expand(batch_size, -1)
+        if self.pos_encoding == "learned":
+            positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
+            positions = positions.unsqueeze(0).expand(batch_size, -1)
+            token_emb = token_emb + self.position_embedding(positions)
+        elif self.pos_encoding == "sinusoidal":
+            token_emb = token_emb + self.sinusoidal_pe[:seq_len].to(token_emb.dtype)
+        # "rope": token embeddings pass through unchanged.
 
-        # Get position embeddings
-        pos_emb = self.position_embedding(positions)
-
-        # Combine and apply dropout
-        embeddings = self.dropout(token_emb + pos_emb)
-
-        return embeddings
+        return self.dropout(token_emb)

@@ -61,14 +61,28 @@ class SimpleTokenizer:
             self.vocab_size = data['vocab_size']
 
 
-def prepare_data(text_file, block_size=1024, train_split=0.9):
+def prepare_data(text_file, block_size=1024, train_split=0.9, tokenizer=None):
+    """
+    Load a text file, tokenize it, and build train/val datasets.
+
+    Args:
+        text_file: path to a UTF-8 text corpus.
+        block_size: context length for the TextDataset windows.
+        train_split: fraction of tokens used for training.
+        tokenizer: optional pre-fitted tokenizer exposing ``.encode(str)`` (e.g.
+            a trained ``BPETokenizer`` from ``modules/m1_fundamentals``). If
+            None, a char-level ``SimpleTokenizer`` is built from the corpus
+            (the historical default, kept for backward compatibility).
+    """
     with open(text_file, 'r', encoding='utf-8') as f:
         text = f.read()
 
-    tokenizer = SimpleTokenizer()
-    tokenizer.build_vocab(text)
+    if tokenizer is None:
+        tokenizer = SimpleTokenizer()
+        tokenizer.build_vocab(text)
 
-    # Encode the entire text
+    # Encode the entire text. uint16 holds any vocab up to 65535 (char ~100,
+    # BPE 5k, and GPT-2's 50257 all fit); bump the dtype if you go larger.
     data = np.array(tokenizer.encode(text), dtype=np.uint16)
 
     # Train/validation split

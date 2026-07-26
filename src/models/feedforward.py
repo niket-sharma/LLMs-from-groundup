@@ -7,14 +7,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .attention import CausalSelfAttention
+from .norms import make_norm
 
 
 class FeedForward(nn.Module):
     """
-    Position-wise Feed-Forward Network.
+    Position-wise Feed-Forward Network (GPT-2 style).
 
-    This is a two-layer MLP with a GELU activation in between.
-    Applied independently to each position.
+    A two-layer MLP with a GELU activation in between, applied independently to
+    each position. Hidden dim is typically 4 * d_model (two matrices → 8·d² params).
 
     Args:
         d_model: Input and output dimension
@@ -49,6 +50,58 @@ class FeedForward(nn.Module):
         return x
 
 
+def swiglu_hidden_dim(d_ff: int) -> int:
+    """
+    The '2/3 · 4d' convention (M1.3).
+
+    A GELU FFN has 2 weight matrices of size d×d_ff (params ≈ 2·d·d_ff). SwiGLU
+    has *three* (gate, up, down), so to keep the parameter count comparable when
+    swapping GELU→SwiGLU we shrink the hidden dim to 2/3 of d_ff. Rounded to a
+    multiple of 8 for hardware (tensor-core) friendliness, as LLaMA does.
+    """
+    hidden = int(2 * d_ff / 3)
+    return max(8, 8 * round(hidden / 8))
+
+
+class SwiGLUFeedForward(nn.Module):
+    """
+    SwiGLU feed-forward network (LLaMA/PaLM/Qwen).
+
+        SwiGLU(x) = W_down( SiLU(W_gate x) ⊙ (W_up x) )
+
+    A *gated* activation: one linear branch (`up`) is modulated elementwise by a
+    SiLU-activated gate branch (`gate`). The gate lets the network learn which
+    features to pass — empirically better than a plain GELU MLP at equal params.
+    SiLU (a.k.a. swish) is x·sigmoid(x). Biases are dropped (LLaMA convention).
+
+    `d_ff` is the *equivalent GELU* hidden dim (e.g. 4·d_model); the actual
+    hidden used is ``swiglu_hidden_dim(d_ff)`` so params ≈ the GELU FFN.
+    """
+
+    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1):
+        super().__init__()
+        hidden = swiglu_hidden_dim(d_ff)
+        self.w_gate = nn.Linear(d_model, hidden, bias=False)
+        self.w_up = nn.Linear(d_model, hidden, bias=False)
+        self.w_down = nn.Linear(hidden, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        gate = F.silu(self.w_gate(x))     # SiLU(W_gate x)
+        up = self.w_up(x)                 # W_up x
+        x = self.w_down(self.dropout(gate * up))
+        return self.dropout(x)
+
+
+def make_ffn(activation: str, d_model: int, d_ff: int, dropout: float) -> nn.Module:
+    """Build the FFN selected by config: 'gelu' -> FeedForward, 'swiglu' -> SwiGLU."""
+    if activation == "gelu":
+        return FeedForward(d_model, d_ff, dropout)
+    if activation == "swiglu":
+        return SwiGLUFeedForward(d_model, d_ff, dropout)
+    raise ValueError(f"unknown activation: {activation!r}")
+
+
 class TransformerBlock(nn.Module):
     """
     A single transformer block.
@@ -77,18 +130,24 @@ class TransformerBlock(nn.Module):
         d_ff: int,
         max_seq_len: int = 1024,
         dropout: float = 0.1,
+        rope=None,
+        norm: str = "layernorm",
+        activation: str = "gelu",
+        qk_norm: bool = False,
     ):
         super().__init__()
 
-        # Layer normalizations (Pre-LN architecture)
-        self.ln1 = nn.LayerNorm(d_model)
-        self.ln2 = nn.LayerNorm(d_model)
+        # Pre-LN architecture; norm kind is config-driven (LayerNorm | RMSNorm).
+        self.ln1 = make_norm(norm, d_model)
+        self.ln2 = make_norm(norm, d_model)
 
-        # Self-attention
-        self.attention = CausalSelfAttention(d_model, n_heads, max_seq_len, dropout)
+        # Self-attention (rope threaded to Q/K; optional QK-norm for stability)
+        self.attention = CausalSelfAttention(
+            d_model, n_heads, max_seq_len, dropout, rope=rope, qk_norm=qk_norm
+        )
 
-        # Feed-forward network
-        self.ffn = FeedForward(d_model, d_ff, dropout)
+        # Feed-forward network (GELU MLP | SwiGLU gated MLP)
+        self.ffn = make_ffn(activation, d_model, d_ff, dropout)
 
         self.dropout = nn.Dropout(dropout)
 

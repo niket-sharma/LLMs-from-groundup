@@ -7,6 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+from .rope import apply_rotary
+from .norms import RMSNorm
+
 
 class MultiHeadAttention(nn.Module):
     """
@@ -20,9 +23,12 @@ class MultiHeadAttention(nn.Module):
         d_model: The dimension of the model (embedding dimension)
         n_heads: Number of attention heads
         dropout: Dropout probability (default: 0.1)
+        rope: Optional RotaryEmbedding. When provided, RoPE is applied to Q and K
+            per head (M1.2). When None, positional info comes from the embedding
+            layer (learned/sinusoidal) instead.
     """
 
-    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1, rope=None, qk_norm=False):
         super().__init__()
 
         assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
@@ -30,6 +36,15 @@ class MultiHeadAttention(nn.Module):
         self.d_model = d_model
         self.n_heads = n_heads
         self.d_k = d_model // n_heads  # Dimension of each head
+        self.rope = rope
+
+        # QK-norm (M1.3): RMSNorm over each head's Q and K before scoring. Used
+        # in recent models (e.g. Gemma-2, Chameleon) to bound attention-logit
+        # magnitude and stabilize training at scale. Applied before RoPE.
+        self.qk_norm = qk_norm
+        if qk_norm:
+            self.q_norm = RMSNorm(self.d_k)
+            self.k_norm = RMSNorm(self.d_k)
 
         # Linear projections for Q, K, V
         self.W_q = nn.Linear(d_model, d_model)
@@ -74,6 +89,21 @@ class MultiHeadAttention(nn.Module):
         K = K.view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
         V = V.view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2)
 
+        # QK-norm: normalize each head's Q and K over the head dimension before
+        # rotation/scoring (order: project → qk_norm → rope → scores).
+        if self.qk_norm:
+            Q = self.q_norm(Q)
+            K = self.k_norm(K)
+
+        # RoPE: rotate Q and K by their absolute position so attention scores
+        # depend only on relative offset. Applied to Q/K but NOT V (V carries
+        # content, not position). Shapes: (batch, n_heads, seq_len, d_k).
+        if self.rope is not None:
+            seq_len = Q.size(2)
+            cos, sin = self.rope(seq_len, device=Q.device, dtype=Q.dtype)
+            Q = apply_rotary(Q, cos, sin)
+            K = apply_rotary(K, cos, sin)
+
         # Scaled dot-product attention
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
 
@@ -116,10 +146,12 @@ class CausalSelfAttention(nn.Module):
         n_heads: int,
         max_seq_len: int = 1024,
         dropout: float = 0.1,
+        rope=None,
+        qk_norm=False,
     ):
         super().__init__()
 
-        self.attention = MultiHeadAttention(d_model, n_heads, dropout)
+        self.attention = MultiHeadAttention(d_model, n_heads, dropout, rope=rope, qk_norm=qk_norm)
         self.max_seq_len = max_seq_len
 
         # Register causal mask as a buffer (not a parameter)

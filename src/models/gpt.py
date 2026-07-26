@@ -9,6 +9,8 @@ from typing import Optional, Tuple, Dict, Any
 
 from .embeddings import GPTEmbedding
 from .feedforward import TransformerBlock
+from .rope import RotaryEmbedding
+from .norms import make_norm
 
 
 class SmallGPT(nn.Module):
@@ -43,6 +45,13 @@ class SmallGPT(nn.Module):
         d_ff: int = 1536,
         max_seq_len: int = 1024,
         dropout: float = 0.1,
+        pos_encoding: str = "learned",
+        rope_base: float = 10000.0,
+        rope_scaling: str = "none",
+        rope_scale_factor: float = 1.0,
+        norm: str = "layernorm",
+        activation: str = "gelu",
+        qk_norm: bool = False,
     ):
         super().__init__()
 
@@ -53,18 +62,39 @@ class SmallGPT(nn.Module):
         self.n_layers = n_layers
         self.d_ff = d_ff
         self.max_seq_len = max_seq_len
+        self.pos_encoding = pos_encoding
+        self.norm = norm
+        self.activation = activation
+
+        # RoPE: one shared rotary module across all layers (they share the same
+        # cos/sin cache). Only built when pos_encoding == "rope"; otherwise the
+        # positional signal lives in the embedding layer.
+        self.rope = None
+        if pos_encoding == "rope":
+            self.rope = RotaryEmbedding(
+                head_dim=d_model // n_heads,
+                max_seq_len=max_seq_len,
+                base=rope_base,
+                scaling=rope_scaling,
+                scale_factor=rope_scale_factor,
+            )
 
         # Embeddings
-        self.embedding = GPTEmbedding(vocab_size, d_model, max_seq_len, dropout)
+        self.embedding = GPTEmbedding(
+            vocab_size, d_model, max_seq_len, dropout, pos_encoding=pos_encoding
+        )
 
         # Transformer blocks
         self.blocks = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, max_seq_len, dropout)
+            TransformerBlock(
+                d_model, n_heads, d_ff, max_seq_len, dropout, rope=self.rope,
+                norm=norm, activation=activation, qk_norm=qk_norm,
+            )
             for _ in range(n_layers)
         ])
 
-        # Final layer normalization
-        self.ln_f = nn.LayerNorm(d_model)
+        # Final normalization (config-driven: LayerNorm | RMSNorm)
+        self.ln_f = make_norm(norm, d_model)
 
         # Output projection (language model head)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
@@ -189,7 +219,9 @@ class SmallGPT(nn.Module):
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
             n_params -= self.embedding.token_embedding.weight.numel()
-            n_params -= self.embedding.position_embedding.weight.numel()
+            # Sinusoidal/RoPE have no learned positional parameters to subtract.
+            if self.embedding.position_embedding is not None:
+                n_params -= self.embedding.position_embedding.weight.numel()
         return n_params
 
 
