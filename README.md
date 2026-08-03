@@ -21,10 +21,34 @@ The full roadmap lives in [`llm-engineer-enhancement.md`](llm-engineer-enhanceme
 | **M4** | `modules/m4_training_scaling/` | Mixed precision, sequence packing, data pipelines, scaling laws | 🔜 |
 | **M5** | `modules/m5_post_training/` | SFT, reward modeling, DPO, GRPO — from scratch on this repo's own GPT | 🔜 |
 | **M6** | `modules/m6_serving/` | Quantization, distillation, FastAPI + continuous batching server, vLLM | 🔜 |
+| **M7 (optional)** | `modules/m7_multimodal_models/` | Vision-language encoders/adapters, multimodal training and speech-model internals | 🔜 |
+| **Model capstone** | `capstone/` | Reproducible train → evaluate → post-train → quantize → serve lifecycle | 🔜 |
 
 Library-based counterparts (TRL fine-tuning, LoRA, RLHF, API usage) live in
 [`practical_llms/`](practical_llms/) — M5/M6 cross-link to them as the
 "production" versions of the from-scratch implementations.
+
+## Combined AI Engineer Learning Path
+
+This repository focuses on how language models are built, trained, optimized
+and served. Continue with
+[`AI-Agents-from-scratch`](https://github.com/niket-sharma/AI-Agents-from-scratch)
+to learn how models are used in retrieval, tool-calling, memory, planning, MCP,
+agent evaluation and production application workflows.
+
+| Repository | Primary responsibility | Handoff |
+|---|---|---|
+| **LLMs-from-groundup** | Model architecture, training, inference, post-training, compression and serving | Exposes a tested local model endpoint |
+| **AI-Agents-from-scratch** | RAG, tools, memory, workflows, agents, evaluation and application safety | Consumes local or hosted models through one interface |
+
+Together they form a model → serving → agent-systems learning path without
+duplicating the same material in both repositories. The detailed ownership map
+lives in [`llm-engineer-enhancement.md`](llm-engineer-enhancement.md#cross-repository-ai-engineer-curriculum).
+
+**New to LLM internals?** Read the end-to-end explainer:
+[`docs/llm_fundamentals.md`](docs/llm_fundamentals.md) — text → tokens →
+embeddings → transformer blocks → logits → sampled token, grounded in this repo's
+own small GPT.
 
 ## Hardware Requirements
 

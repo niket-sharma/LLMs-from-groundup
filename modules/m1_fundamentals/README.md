@@ -4,6 +4,11 @@ Deep-dives on the pieces the base repo glosses over. The existing `src/` code is
 the baseline; M1 adds the *why* and the modern variants that become defaults for
 every later module.
 
+> **New here?** Start with the narrative walkthrough:
+> [`docs/llm_fundamentals.md`](../../docs/llm_fundamentals.md) — follows text →
+> tokens → embeddings → blocks → logits → sampled token end to end. This README
+> is the reference + interview-Q&A companion to it.
+
 | Sub-module | Files | Status |
 |---|---|---|
 | 1.1 Tokenizers from scratch | `bpe_tokenizer.py`, `tokenizer_comparison.py`, `test_bpe_tokenizer.py` | ✅ |

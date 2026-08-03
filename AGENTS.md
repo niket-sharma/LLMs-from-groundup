@@ -18,6 +18,7 @@ Always use the Make targets — they pick the right Python automatically:
 - `make lint` — ruff check on `src`, `tests`, `benchmarks`
 - `make format` — ruff format + autofix
 - `make bench-smoke` — fast CPU sanity benchmark (< 1 min)
+- `make docs-check` — validates module run/understand/validate/test guides
 
 ## Architecture rules
 
@@ -32,16 +33,20 @@ Always use the Make targets — they pick the right Python automatically:
 
 ## Module folder contract (`modules/mX_topic/`)
 
-Each module ships four things:
+Each module ships code, evidence, and a learning guide:
 
 1. `README.md` — concepts, math, diagrams, interview questions
 2. `<topic>.py` — heavily-commented from-scratch implementation
 3. `benchmark.py` — measures the claimed improvement
 4. `test_<topic>.py` — correctness tests (parity vs reference implementation)
+5. `docs/modules/mX_topic/index.md` — how to understand, run, validate, test,
+   and troubleshoot the implementation
 
 **Golden rule:** parity test before benchmark. Prove correctness against the
 naive reference (within tolerance), *then* prove the win. Benchmark outputs
 (JSON + PNG) are committed to `benchmarks/results/`.
+Documentation is updated in the same PR as the implementation; every documented
+CPU-smoke command must be runnable from repository root.
 
 ## Hardware limits
 

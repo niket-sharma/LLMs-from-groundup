@@ -151,7 +151,7 @@ class TransformerBlock(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache: bool = False):
         """
         Forward pass.
 
@@ -163,11 +163,19 @@ class TransformerBlock(nn.Module):
             attention_weights: Attention weights from self-attention
         """
         # Self-attention with residual connection (Pre-LN)
-        attn_out, attn_weights = self.attention(self.ln1(x))
+        attention_result = self.attention(
+            self.ln1(x), past_key_value=past_key_value, use_cache=use_cache
+        )
+        if use_cache:
+            attn_out, attn_weights, present_key_value = attention_result
+        else:
+            attn_out, attn_weights = attention_result
         x = x + self.dropout(attn_out)
 
         # Feed-forward with residual connection (Pre-LN)
         ffn_out = self.ffn(self.ln2(x))
         x = x + self.dropout(ffn_out)
 
+        if use_cache:
+            return x, attn_weights, present_key_value
         return x, attn_weights

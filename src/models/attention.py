@@ -62,6 +62,9 @@ class MultiHeadAttention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         mask: torch.Tensor = None,
+        past_key_value=None,
+        use_cache: bool = False,
+        position_offset: int = 0,
     ):
         """
         Forward pass of multi-head attention.
@@ -100,9 +103,19 @@ class MultiHeadAttention(nn.Module):
         # content, not position). Shapes: (batch, n_heads, seq_len, d_k).
         if self.rope is not None:
             seq_len = Q.size(2)
-            cos, sin = self.rope(seq_len, device=Q.device, dtype=Q.dtype)
-            Q = apply_rotary(Q, cos, sin)
-            K = apply_rotary(K, cos, sin)
+            total_len = position_offset + seq_len
+            cos, sin = self.rope(total_len, device=Q.device, dtype=Q.dtype)
+            Q = apply_rotary(Q, cos[position_offset:], sin[position_offset:])
+            K = apply_rotary(K, cos[position_offset:], sin[position_offset:])
+
+        # Cached K/V are already position-rotated and projected. Concatenating
+        # them means decoding one new token only performs O(current_length) work
+        # in attention instead of recomputing all earlier projections/blocks.
+        if past_key_value is not None:
+            past_k, past_v = past_key_value
+            K = torch.cat((past_k, K), dim=2)
+            V = torch.cat((past_v, V), dim=2)
+        present_key_value = (K, V) if use_cache else None
 
         # Scaled dot-product attention
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
@@ -123,6 +136,8 @@ class MultiHeadAttention(nn.Module):
         # Output projection
         output = self.W_o(context)
 
+        if use_cache:
+            return output, attention_weights, present_key_value
         return output, attention_weights
 
 
@@ -159,7 +174,7 @@ class CausalSelfAttention(nn.Module):
         mask = torch.tril(torch.ones(max_seq_len, max_seq_len))
         self.register_buffer('causal_mask', mask.view(1, 1, max_seq_len, max_seq_len))
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, past_key_value=None, use_cache: bool = False):
         """
         Forward pass of causal self-attention.
 
@@ -171,8 +186,17 @@ class CausalSelfAttention(nn.Module):
             attention_weights: Attention weights
         """
         seq_len = x.size(1)
+        past_len = 0 if past_key_value is None else past_key_value[0].size(2)
+        total_len = past_len + seq_len
 
-        # Get the appropriate slice of the causal mask
-        mask = self.causal_mask[:, :, :seq_len, :seq_len]
+        # Query row i is at absolute position past_len + i, so it may attend to
+        # every cached key plus new keys through i. Constructing this small mask
+        # also avoids a fragile square-mask slice during incremental decoding.
+        query_positions = torch.arange(past_len, total_len, device=x.device).view(-1, 1)
+        key_positions = torch.arange(total_len, device=x.device).view(1, -1)
+        mask = (key_positions <= query_positions).view(1, 1, seq_len, total_len)
 
-        return self.attention(x, x, x, mask)
+        return self.attention(
+            x, x, x, mask, past_key_value=past_key_value, use_cache=use_cache,
+            position_offset=past_len,
+        )

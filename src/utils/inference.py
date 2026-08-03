@@ -19,6 +19,7 @@ class GPTInference:
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         do_sample: bool = True,
+        use_kv_cache: bool = False,
     ) -> str:
         # Encode the prompt
         tokens = self.tokenizer.encode(prompt)
@@ -27,7 +28,7 @@ class GPTInference:
         # Generate
         with torch.no_grad():
             generated_tokens = self._generate_tokens(
-                tokens, max_new_tokens, temperature, top_k, top_p, do_sample
+                tokens, max_new_tokens, temperature, top_k, top_p, do_sample, use_kv_cache
             )
 
         # Decode the generated tokens
@@ -42,15 +43,25 @@ class GPTInference:
         top_k: Optional[int],
         top_p: Optional[float],
         do_sample: bool,
+        use_kv_cache: bool = False,
     ) -> torch.Tensor:
 
+        past_key_values = None
+        current_input = tokens
         for _ in range(max_new_tokens):
             # Crop tokens if sequence is too long
             if tokens.size(1) > self.model.max_seq_len:
                 tokens = tokens[:, -self.model.max_seq_len:]
+                current_input = tokens
+                past_key_values = None
 
             # Forward pass
-            logits = self.model(tokens)
+            if use_kv_cache:
+                logits, past_key_values = self.model(
+                    current_input, past_key_values=past_key_values, use_cache=True
+                )
+            else:
+                logits = self.model(tokens)
             logits = logits[:, -1, :]  # Get last token logits
 
             # Apply temperature
@@ -84,6 +95,7 @@ class GPTInference:
 
             # Append to sequence
             tokens = torch.cat([tokens, next_token], dim=1)
+            current_input = next_token
 
         return tokens
 
@@ -95,12 +107,13 @@ class GPTInference:
         top_k: Optional[int] = None,
         top_p: Optional[float] = None,
         do_sample: bool = True,
+        use_kv_cache: bool = False,
     ) -> List[str]:
 
         results = []
         for prompt in prompts:
             generated = self.generate(
-                prompt, max_new_tokens, temperature, top_k, top_p, do_sample
+                prompt, max_new_tokens, temperature, top_k, top_p, do_sample, use_kv_cache
             )
             results.append(generated)
         return results
@@ -115,11 +128,12 @@ def generate_text(
     top_k: Optional[int] = None,
     top_p: Optional[float] = None,
     device: Optional[str] = None,
+    use_kv_cache: bool = False,
 ) -> str:
 
     inference = GPTInference(model, tokenizer, device)
     return inference.generate(
-        prompt, max_new_tokens, temperature, top_k, top_p
+        prompt, max_new_tokens, temperature, top_k, top_p, use_kv_cache=use_kv_cache
     )
 
 

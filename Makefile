@@ -2,7 +2,7 @@
 # Uses the local venv if present, otherwise whatever python3 is on PATH.
 PY := $(shell test -x venv/bin/python && echo venv/bin/python || echo python3)
 
-.PHONY: test lint format bench-smoke
+.PHONY: test lint format bench-smoke m2-smoke docs-check
 
 test:
 	$(PY) -m pytest tests/ modules/ -q
@@ -18,3 +18,10 @@ format:
 # a short generation, writes benchmarks/results/smoke.json. Must stay <1 min.
 bench-smoke:
 	$(PY) benchmarks/smoke.py --preset tiny --device cpu
+
+m2-smoke:
+	$(PY) -m pytest modules/m2_inference_opt/ -q
+	$(PY) modules/m2_inference_opt/benchmark.py --device cpu --preset tiny
+
+docs-check:
+	$(PY) scripts/check_module_docs.py

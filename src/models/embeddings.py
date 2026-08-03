@@ -150,7 +150,7 @@ class GPTEmbedding(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.d_model = d_model
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, position_offset: int = 0) -> torch.Tensor:
         """
         Forward pass.
 
@@ -166,11 +166,15 @@ class GPTEmbedding(nn.Module):
         token_emb = self.token_embedding(x)
 
         if self.pos_encoding == "learned":
-            positions = torch.arange(0, seq_len, dtype=torch.long, device=x.device)
+            positions = torch.arange(
+                position_offset, position_offset + seq_len, dtype=torch.long, device=x.device
+            )
             positions = positions.unsqueeze(0).expand(batch_size, -1)
             token_emb = token_emb + self.position_embedding(positions)
         elif self.pos_encoding == "sinusoidal":
-            token_emb = token_emb + self.sinusoidal_pe[:seq_len].to(token_emb.dtype)
+            token_emb = token_emb + self.sinusoidal_pe[
+                position_offset:position_offset + seq_len
+            ].to(token_emb.dtype)
         # "rope": token embeddings pass through unchanged.
 
         return self.dropout(token_emb)

@@ -122,6 +122,8 @@ class SmallGPT(nn.Module):
         self,
         idx: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
+        past_key_values=None,
+        use_cache: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass of the model.
@@ -134,12 +136,34 @@ class SmallGPT(nn.Module):
             logits: Output logits of shape (batch_size, seq_len, vocab_size)
             loss: Cross-entropy loss if targets provided, None otherwise
         """
+        if targets is not None and use_cache:
+            raise ValueError("loss computation with use_cache=True is unsupported")
+        if past_key_values is not None and len(past_key_values) != len(self.blocks):
+            raise ValueError("past_key_values must contain one (K, V) tuple per transformer block")
+
+        # All layers have the same cache length. Position-aware embeddings and
+        # RoPE must start at that absolute offset during incremental decoding.
+        past_len = 0
+        if past_key_values is not None:
+            past_len = past_key_values[0][0].size(2)
+        if past_len + idx.size(1) > self.max_seq_len:
+            raise ValueError(
+                f"cached sequence length {past_len + idx.size(1)} exceeds "
+                f"max_seq_len={self.max_seq_len}; start a fresh cache after cropping"
+            )
+
         # Get embeddings
-        x = self.embedding(idx)  # (batch_size, seq_len, d_model)
+        x = self.embedding(idx, position_offset=past_len)  # (batch_size, seq_len, d_model)
 
         # Pass through transformer blocks
-        for block in self.blocks:
-            x, _ = block(x)
+        present_key_values = []
+        for layer_index, block in enumerate(self.blocks):
+            layer_past = None if past_key_values is None else past_key_values[layer_index]
+            if use_cache:
+                x, _, present = block(x, past_key_value=layer_past, use_cache=True)
+                present_key_values.append(present)
+            else:
+                x, _ = block(x)
 
         # Final layer norm
         x = self.ln_f(x)
@@ -158,6 +182,8 @@ class SmallGPT(nn.Module):
             )
             return logits, loss
 
+        if use_cache:
+            return logits, tuple(present_key_values)
         return logits
 
     @torch.no_grad()
